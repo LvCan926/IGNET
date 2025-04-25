@@ -1,0 +1,17 @@
+*.pyc*
+*DS_Store*
+.pre-commit-config.yaml
+*.csv
+*.npy
+*.pth
+*.pt
+src/data/TP/raw_data
+src/data/TP/processed_data
+mydata
+csv
+*.pkl
+src/data/TP/processed_data/BJTaxi_test.pkl
+checkpoint
+doc
+*.h5
+*.txt
