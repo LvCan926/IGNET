@@ -5,7 +5,7 @@
 
 import sys
 
-sys.path.append("./src/his")  # 添加自定义模块路径
+sys.path.append("./src/history")  # 添加自定义模块路径
 import os
 import numpy as np
 import pandas as pd
@@ -121,8 +121,8 @@ nl = 0
 l = 0
 
 # 路径配置
-raw_path = "./src/his/data/TP/raw_data"
-data_folder_name = "./src/his/data/TP/processed_data/"
+raw_path = "./src/history/data/TP/raw_data"
+data_folder_name = "./src/history/data/TP/processed_data/"
 
 maybe_makedirs(data_folder_name)  # 创建输出目录
 
@@ -133,7 +133,7 @@ data_columns = pd.MultiIndex.from_product(
 
 
 # ======================= 处理ETH-UCY数据集 =======================
-for desired_source in ['eth', 'hotel', 'univ', 'zara1', 'zara2', 'BJTaxi']:  # 遍历所有子数据集
+for desired_source in ['eth', 'BJTaxi']:  # 遍历所有子数据集
     if desired_source != "BJTaxi":
         continue
     for data_class in ['train', 'val', 'test']:
@@ -169,28 +169,7 @@ for desired_source in ['eth', 'hotel', 'univ', 'zara1', 'zara2', 'BJTaxi']:  # �
                         full_data_path, sep="\t", index_col=False
                     )
                     
-                    type = ""
-                    
-                    # 检查并适应新的数据格式（包含size列）
-                    if 'cluster_id' in data.columns and 'time' in data.columns and 'lon' in data.columns and 'lat' in data.columns:
-                        # 重命名列以匹配处理逻辑
-                        data.rename(columns={
-                            'cluster_id': 'track_id',
-                            'time': 'frame_id',
-                            'lon': 'pos_x',
-                            'lat': 'pos_y'
-                        }, inplace=True)
-                        
-                        # 保存size列，如果存在
-                        if 'cluster_size' in data.columns:
-                            data['cluster_size'] = data['cluster_size']  # 保留size列
-                            
-                        type = "BJTaxi"
-                    else :
-                        data.columns = ["frame_id", "track_id", "pos_x", "pos_y"]
-                        type = "ETH"
-                        
-                    print(type)
+                    data.columns = ["frame_id", "track_id", "pos_x", "pos_y"]
                     
                     # 数据类型转换
                     data["frame_id"] = pd.to_numeric(
@@ -267,22 +246,12 @@ for desired_source in ['eth', 'hotel', 'univ', 'zara1', 'zara2', 'BJTaxi']:  # �
                             ("acceleration", "x"): ax,
                             ("acceleration", "y"): ay,
                         }
-                        
-                        # 如果存在size列，添加到数据字典
-                        if 'cluster_size' in node_df.columns:
-                            data_dict[("cluster_size", "")] = node_df["cluster_size"].values
 
                         # 创建节点对象
                         node_data = pd.DataFrame(data_dict)
                         
                         # 确保数据列的正确顺序
-                        if 'cluster_size' in node_df.columns:
-                            # 更新data_columns包含size
-                            size_columns = pd.MultiIndex.from_product([["cluster_size"], [""]])
-                            combined_columns = data_columns.append(size_columns)
-                            node_data = node_data.reindex(columns=combined_columns)
-                        else:
-                            node_data = node_data.reindex(columns=data_columns)
+                        node_data = node_data.reindex(columns=data_columns)
                             
                         node = Node(
                             node_type=env.NodeType.PEDESTRIAN,

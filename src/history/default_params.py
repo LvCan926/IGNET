@@ -6,7 +6,7 @@ _C.LOAD_TUNED = True
 
 # Data
 _C.DATA = CN()
-_C.DATA.PATH = "./src/his/data/"
+_C.DATA.PATH = "./src/history/data/"
 _C.DATA.TASK = "TP"
 _C.DATA.DATASET_NAME = "sdd"
 _C.DATA.OBSERVE_LENGTH = 8

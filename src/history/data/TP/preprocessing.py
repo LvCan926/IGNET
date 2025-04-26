@@ -33,23 +33,42 @@ def dict_collate(batch):
     batch = collate(batch)
     
     # 解包从批次中提取的字段
-    (
-        first_history_index,
-        x_t,
-        y_t,
-        x_st_t,
-        y_st_t,
-        neighbors_data_st,
-        neighbors_gt_st,
-        neighbors_edge_value,
-        robot_traj_st_t,
-        map_tuple,
-        dt,
-        index,
-        obs_ts,
-        gt_ts,
-        cluster_size,
-    ) = batch
+    if len(batch) == 15:  # 如果有额外的cluster_size数据
+        (
+            first_history_index,
+            x_t,
+            y_t,
+            x_st_t,
+            y_st_t,
+            neighbors_data_st,
+            neighbors_gt_st,
+            neighbors_edge_value,
+            robot_traj_st_t,
+            map_tuple,
+            dt,
+            index,
+            obs_ts,
+            gt_ts,
+            cluster_size,
+        ) = batch
+    else:  # 标准的14个字段
+        (
+            first_history_index,
+            x_t,
+            y_t,
+            x_st_t,
+            y_st_t,
+            neighbors_data_st,
+            neighbors_gt_st,
+            neighbors_edge_value,
+            robot_traj_st_t,
+            map_tuple,
+            dt,
+            index,
+            obs_ts,
+            gt_ts,
+        ) = batch
+        cluster_size = None  # 如果没有cluster_size字段，设为None
 
     # 将提取的字段打包成一个字典，返回这个字典
     out = {
@@ -67,8 +86,11 @@ def dict_collate(batch):
         "first_history_index": first_history_index,  # 第一个历史索引
         "obs_ts": obs_ts,  # 历史轨迹的真实时间戳
         "gt_ts": gt_ts,    # 未来轨迹的真实时间戳
-        "cluster_size": cluster_size,  # 集群大小
     }
+
+    # 如果有cluster_size字段，添加到字典中
+    if cluster_size is not None:
+        out["cluster_size"] = cluster_size
 
     return out  # 返回整理好的字典
 
@@ -223,36 +245,6 @@ def get_node_timestep_data(
     y_t = torch.tensor(y, dtype=torch.float)
     x_st_t = torch.tensor(x_st, dtype=torch.float)
     y_st_t = torch.tensor(y_st, dtype=torch.float)
-
-    # 获取cluster_size数据（如果存在）
-    cluster_size_x = None
-    cluster_size_y = None
-    try:
-        # 尝试获取历史轨迹的cluster_size
-        cluster_size_x = node.get(timestep_range_x, {"cluster_size": [""]})
-        # 尝试获取预测轨迹的cluster_size
-        cluster_size_y = node.get(timestep_range_y, {"cluster_size": [""]})
-        
-        # 将numpy数组转换为tensor
-        if cluster_size_x is not None and cluster_size_y is not None:
-            # 确保是整数类型
-            cluster_size_x = np.round(cluster_size_x).astype(np.int32)
-            cluster_size_y = np.round(cluster_size_y).astype(np.int32)
-            
-            # 将numpy数组转换为tensor
-            cluster_size_x = torch.tensor(cluster_size_x, dtype=torch.int32)
-            cluster_size_y = torch.tensor(cluster_size_y, dtype=torch.int32)
-            
-            # 拼接历史和未来的cluster_size
-            cluster_size = torch.cat([cluster_size_x, cluster_size_y], dim=0)
-            
-            # 确保最小值为1
-            cluster_size = torch.where(cluster_size <= 0, torch.ones_like(cluster_size), cluster_size)
-        else:
-            cluster_size = None
-    except (KeyError, ValueError):
-        # 如果获取失败，设置为None
-        cluster_size = None
 
     # 处理邻居数据
     neighbors_data_st = None
@@ -430,7 +422,6 @@ def get_node_timestep_data(
         (scene.name, t, "/".join([node.type.name, node.id])),
         obs_ts,  # 历史轨迹的时间戳数组
         gt_ts,   # 未来（ground truth/预测）的时间戳数组
-        cluster_size,  # 新增返回cluster_size数据
     )
 
 def get_timesteps_data(env, scene, t, node_type, state, pred_state,
@@ -491,7 +482,7 @@ def data_dict_to_next_step(data_dict, time_step):
     
     :param data_dict: 原始数据字典，格式为 dict_collate 输出结构
     :param time_step: 要前移的时间步数（通常为1）
-    :return: 新的数据字典，obs 和 obs_st 中包含了更多“真实”未来信息
+    :return: 新的数据字典，obs 和 obs_st 中包含了更多"真实"未来信息
     """
     
     data_dict_ = deepcopy(data_dict)    # 拷贝原始数据，避免修改原对象
@@ -506,7 +497,7 @@ def data_dict_to_next_step(data_dict, time_step):
     bs, n, d_o = obs.shape  # bs: 批次大小, n: 历史步数, d_o: 状态维度
     _, _, d_g = gt.shape    # d_g: 预测目标的维度
     
-    # 将历史数据“右移”：用预测数据的前几步补齐末尾
+    # 将历史数据"右移"：用预测数据的前几步补齐末尾
     data_dict_["obs"][:, :-time_step] = obs[:, time_step:]
     data_dict_["obs"][:, -time_step:, :d_g] = gt[:, :time_step]
     
@@ -514,21 +505,6 @@ def data_dict_to_next_step(data_dict, time_step):
     data_dict_["obs_st"][:, :-time_step] = obs_st[:, time_step:]
     data_dict_["obs_st"][:, -time_step:, :d_g] = gt_st[:, :time_step]
     
-    # ==== 更新 cluster_size 字段（如果存在）====
-    if "cluster_size" in data_dict and data_dict["cluster_size"] is not None:
-        cluster_size = data_dict["cluster_size"]
-        # 确保cluster_size是正确的形状
-        if len(cluster_size.shape) >= 2:
-            # 确保是整数类型
-            if not torch.is_integral(cluster_size):
-                cluster_size = torch.round(cluster_size).to(torch.int32)
-                # 确保最小值为1
-                cluster_size = torch.where(cluster_size <= 0, torch.ones_like(cluster_size), cluster_size)
-                data_dict_["cluster_size"] = cluster_size
-            
-            # 更新cluster_size，与obs和gt保持一致
-            data_dict_["cluster_size"][:, :-time_step] = cluster_size[:, time_step:]
-            data_dict_["cluster_size"][:, -time_step:] = cluster_size[:, :time_step]
     
     """
     neighbors_st_ = []

@@ -89,8 +89,6 @@ def k_means(batch_x, ncluster=20, iter=5, disable_trange=True):
     返回:
         batch_c: 聚类中心张量，形状为 [B, ncluster, D]
     """
-    # 记录K-means开始时间
-    kmeans_start_time = time.time()
     
     # 获取输入数据的维度信息
     B, N, D = batch_x.size()  # B=batch数, N=样本数, D=特征维度
@@ -130,9 +128,6 @@ def k_means(batch_x, ncluster=20, iter=5, disable_trange=True):
         # 将当前batch的聚类中心添加到结果中 [1, ncluster, D]
         batch_c = torch.cat((batch_c, c.unsqueeze(0)), dim=0)
     
-    # 记录并打印耗时
-    kmeans_end_time = time.time()
-    print(f"K-means聚类耗时: {kmeans_end_time-kmeans_start_time:.4f} s")
     return batch_c  # 返回所有batch的聚类中心 [B, ncluster, D]
 
 
@@ -180,7 +175,11 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
                     # 将cluster_size转换为整数
                     batch_cluster_size = batch_cluster_size.astype(np.int32)
                 cluster_size_list.append(batch_cluster_size)
-                
+                # 调试用
+                print(f"批次 {i} 包含cluster_size，形状: {batch_cluster_size.shape}")
+            else:
+                print(f"批次 {i} 不包含cluster_size")
+            
             pred_list_i = []
             gt_list_i = []
 
@@ -256,13 +255,10 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
             process_results_time = time.time() - process_results_start_time
 
         # 打印单批次各阶段耗时
-        print(f"数据加载耗时: {data_loading_time:.4f} s")
         print(f"编码器耗时: {encoder_time:.4f} s")
-        print(f"基础位置计算耗时: {base_pos_time:.4f} s")
         print(f"流采样耗时: {flow_sample_time:.4f} s")
         print(f"字典处理耗时: {dict_process_time:.4f} s")
         print(f"去归一化耗时: {denormalize_time:.4f} s")
-        print(f"结果处理耗时: {process_results_time:.4f} s")
 
     # 检查列表是否为空
     if len(pred_list) == 0:
@@ -287,17 +283,15 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
     
     # 新增：处理cluster_size数据
     cluster_size_array = None
-    # if cluster_size_list:
-    #     cluster_size_array = np.concatenate(cluster_size_list, axis=0)
+    if cluster_size_list:
+        cluster_size_array = np.concatenate(cluster_size_list, axis=0)
     concat_time = time.time() - concat_start_time
-    print(f"数组连接耗时: {concat_time:.4f} s")
 
     pred_list_flatten_start_time = time.time()
     pred_list_flatten = torch.Tensor(
         pred_list.reshape(pred_list.shape[0], cfg.MGF.POST_CLUSTER, -1)
     ).cuda()
     pred_list_flatten_time = time.time() - pred_list_flatten_start_time
-    print(f"预测列表压平耗时: {pred_list_flatten_time:.4f} s")
 
     kmeans_start_time = time.time()
     pred_list = (
@@ -313,14 +307,13 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
     best_indices = np.argmin(ade_per_traj, axis=1)  # (B,)
     best_preds = pred_list[np.arange(len(pred_list)), best_indices]  # (B, 12, 2)
     calc_ade_time = time.time() - calc_ade_start_time
-    print(f"计算ADE并选择最佳轨迹耗时: {calc_ade_time:.4f} s")
     
     print(f"best_preds.shape: {best_preds.shape}")
 
     inference_end_time = time.time()
     print(f"总推理耗时: {inference_end_time-inference_start_time:.4f} s")
 
-    return obs_list, gt_list, pred_list, best_preds, obs_ts_array, gt_ts_array, cluster_size_array  # 新增返回 cluster_size_array
+    return obs_list, gt_list, pred_list, best_preds, obs_ts_array, gt_ts_array, cluster_size_array
 
 
 def evaluate_metrics(args, gt_list, pred_list):
@@ -354,6 +347,15 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
     flow: 流量矩阵，形状为 (time_count, 2, grid_size, grid_size)
     """
     flow_start_time = time.time()
+    
+    # 调试信息：查看cluster_size_array是否存在及其形状
+    if cluster_size_array is not None:
+        print(f"聚合流量：cluster_size_array存在，形状: {cluster_size_array.shape}")
+        print(f"样本数量: {traj.shape[0]}, cluster_size_array样本数: {len(cluster_size_array)}")
+        print(f"前5个样本的cluster_size值: {[cluster_size_array[i][0] if i < len(cluster_size_array) else None for i in range(min(5, len(cluster_size_array)))]}")
+    else:
+        print("聚合流量：未提供cluster_size_array，所有流量权重默认为1")
+    
     # 北京出租车数据集边界
     min_lon = 116.2503565
     max_lon = 116.50032165
@@ -369,6 +371,9 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
     pred_time_max = 0
     pred_time_min = 1000000
     
+    # 使用的实际样本数
+    valid_samples = 0
+    
     # 处理每个样本的轨迹
     for b in range(traj.shape[0]):
         sample_traj = traj[b]  # 获取单个样本的轨迹
@@ -378,11 +383,13 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
         sample_cluster_size = None
         if cluster_size_array is not None and b < len(cluster_size_array):
             sample_cluster_size = cluster_size_array[b]
+            # 调试用：打印样本的cluster_size值
+            if b < 5:  # 只打印前5个样本的信息
+                print(f"样本 {b} 的 cluster_size: {sample_cluster_size[0]}")
         
         # 更新预测时间步的最大最小值
         pred_time_max = max(pred_time_max, sample_gt_ts_array.max())
         pred_time_min = min(pred_time_min, sample_gt_ts_array.min())
-        
         
         # 从第二个点开始遍历
         for t in range(1, sample_traj.shape[0]):
@@ -404,13 +411,15 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
                 continue
             
             # 计算该点的流量值（默认为1，如果有cluster_size则使用其值）
-            flow_value = 1
-            if sample_cluster_size is not None and t < len(sample_cluster_size):
-                # 确保是整数类型
-                flow_value = int(sample_cluster_size[t])
-                # 如果flow_value为0，设置为默认值1
-                if flow_value <= 0:
-                    flow_value = 1
+            flow_value = 1  # Default value
+            if sample_cluster_size is not None:
+                # 因为 sample_cluster_size 中所有值都相同 (代表该样本的簇大小)
+                # 所以直接取第一个元素即可
+                current_cluster_size = int(sample_cluster_size[0])
+                if current_cluster_size > 0:  # 使用有效的簇大小
+                    flow_value = current_cluster_size
+                    if b < 5 and t == 1:  # 只对前5个样本的第一个轨迹点打印
+                        print(f"样本 {b}, 时间步 {t}: 使用流量值 {flow_value}")
             
             # 映射到网格坐标
             prev_row, prev_col = map_to_grid(prev_x, prev_y, min_lon, max_lon, min_lat, max_lat, grid_size)
@@ -420,8 +429,10 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
             if (prev_row != curr_row) or (prev_col != curr_col):
                 flow[time_step, 0, prev_row, prev_col] += flow_value  # 流出量
                 flow[time_step, 1, curr_row, curr_col] += flow_value  # 流入量
+                valid_samples += 1
     
     print(f"预测时间步的最大最小值: {pred_time_max}/{pred_time_min}")
+    print(f"有效样本数: {valid_samples}")
     flow_end_time = time.time()
     print(f"流量聚合耗时: {flow_end_time-flow_start_time:.4f} s")
     
@@ -474,7 +485,6 @@ def test(cfg, args, logger=None):
     args.config_file = f"./config/{scene}.yml"
     cfg = load_config_test(args)
 
-    args.use_clustering = False
     args.task = "test"
     
     args.clusterGMM = cfg.MGF.ENABLE
@@ -482,7 +492,6 @@ def test(cfg, args, logger=None):
     args.var_init = cfg.MGF.VAR_INIT
     args.learn_var = cfg.MGF.VAR_LEARNABLE
     load_config_end_time = time.time()
-    print(f"配置加载耗时: {load_config_end_time-load_config_start_time:.4f} s")
 
     model_build_start_time = time.time()
     model = Build_Model(cfg, args)
@@ -513,24 +522,16 @@ def test(cfg, args, logger=None):
     grid_size = 32  # 设置网格大小
 
     for i_trial in range(1):
-        set_seeds_start_time = time.time()
         set_seeds(random.randint(0,1000))
-        set_seeds_end_time = time.time()
-        print(f"设置随机种子耗时: {set_seeds_end_time-set_seeds_start_time:.4f} s")
 
         inference_start_time = time.time()
         obs_list, gt_list, pred_list, best_preds_list, obs_ts_array, gt_ts_array, cluster_size_array = run_inference(cfg, model, metrics, test_loader, disable_tqdm=True)
         inference_end_time = time.time()
         print(f"推理总耗时: {inference_end_time-inference_start_time:.4f} s")
         
-        metrics_start_time = time.time()
         minade, minfde = evaluate_metrics(args, gt_list, pred_list)
         print(f"{args.scene} test {i_trial}:\n {minade}/{minfde}")
-        metrics_end_time = time.time()
-        print(f"指标评估耗时: {metrics_end_time-metrics_start_time:.4f} s")
         
-
-
         # 直接聚合轨迹流量，使用cluster_size
         flow_start_time = time.time()
         pred_flow = aggregate_flow(best_preds_list, gt_ts_array, grid_size, time_start=7200, time_end=10079, cluster_size_array=cluster_size_array)
@@ -548,7 +549,6 @@ def test(cfg, args, logger=None):
         print(f"流量处理总耗时: {flow_end_time-flow_start_time:.4f} s")
         
         # 计算流量误差（不依赖于模型）
-        metrics_start_time = time.time()
         outflow_rmse, outflow_mae = calculate_metrics(pred_flow, real_flow, direction=0)
         inflow_rmse, inflow_mae = calculate_metrics(pred_flow, real_flow, direction=1)
         
@@ -568,8 +568,6 @@ def test(cfg, args, logger=None):
         print(f"Outflow MAE: {outflow_mae:.4f}")
         print(f"Inflow RMSE: {inflow_rmse:.4f}") 
         print(f"Inflow MAE: {inflow_mae:.4f}")
-        metrics_end_time = time.time()
-        print(f"流量指标计算耗时: {metrics_end_time-metrics_start_time:.4f} s")
 
         # 在CSV输出中也包含cluster_size
         csv_start_time = time.time()
@@ -595,9 +593,9 @@ def test(cfg, args, logger=None):
                 }
                 
                 # 如果有cluster_size数据，添加到CSV
-                if sample_cluster_size is not None and timestep < len(sample_cluster_size):
-                    # 确保cluster_size为整数
-                    cluster_size_value = int(sample_cluster_size[timestep])
+                if sample_cluster_size is not None:
+                    # 直接取第一个元素作为该样本的 cluster_size
+                    cluster_size_value = int(sample_cluster_size[0])
                     if cluster_size_value <= 0:  # 确保最小值为1
                         cluster_size_value = 1
                     row_data["cluster_size"] = cluster_size_value
@@ -632,9 +630,9 @@ def test(cfg, args, logger=None):
                 }
                 
                 # 如果有cluster_size数据，添加到CSV
-                if sample_cluster_size is not None and timestep < len(sample_cluster_size):
-                    # 确保cluster_size为整数
-                    cluster_size_value = int(sample_cluster_size[timestep])
+                if sample_cluster_size is not None:
+                    # 直接取第一个元素作为该样本的 cluster_size
+                    cluster_size_value = int(sample_cluster_size[0])
                     if cluster_size_value <= 0:  # 确保最小值为1
                         cluster_size_value = 1
                     row_data["cluster_size"] = cluster_size_value
@@ -667,9 +665,9 @@ def test(cfg, args, logger=None):
                 }
                 
                 # 如果有cluster_size数据，添加到CSV
-                if sample_cluster_size is not None and timestep < len(sample_cluster_size):
-                    # 确保cluster_size为整数
-                    cluster_size_value = int(sample_cluster_size[timestep])
+                if sample_cluster_size is not None:
+                    # 直接取第一个元素作为该样本的 cluster_size
+                    cluster_size_value = int(sample_cluster_size[0])
                     if cluster_size_value <= 0:  # 确保最小值为1
                         cluster_size_value = 1
                     row_data["cluster_size"] = cluster_size_value
