@@ -61,7 +61,7 @@ class fastpredNF_TP(nn.Module):
 
         self.model_type = cfg.MODEL.TYPE
         if cfg.MODEL.TYPE == "fastpredNF_CIF_separate_cond_clusterGMM":
-            cluster_model_path = f"src/clustering/models/{args.scene}_train_{args.cluster_method}_{str(args.cluster_n)}{args.cluster_name}.pkl"
+            cluster_model_path = f"src/his/clustering/models/{args.scene}_train_{args.cluster_method}_{str(args.cluster_n)}{args.cluster_name}.pkl"
             self.flow = model_dict[cfg.MODEL.TYPE](
                 input_size=self.output_size,
                 n_blocks=n_blocks,

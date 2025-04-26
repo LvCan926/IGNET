@@ -4,7 +4,6 @@ import numpy as np
 import h5py
 from models.TP.fastpredNF import fastpredNF_TP
 from models.TP.dis_flow import FlowDiscriminator
-from models.TP.dual_modal_flow import DualModalFlowPredictor
 
 class TrajectoryFlowGenerator(fastpredNF_TP):
     def __init__(self, cfg, args):
@@ -41,14 +40,6 @@ class TrajectoryFlowGenerator(fastpredNF_TP):
         # 初始化新生流量预测器
         self.new_flow_predictor = NewFlowPredictor(grid_size=self.grid_size)
         
-        # 初始化双模态流量预测器
-        self.dual_modal_predictor = DualModalFlowPredictor(
-            grid_size=self.grid_size,
-            time_steps=12,
-            direction_channels=2,
-            historical_steps=108
-        )
-        
         # 加载模型权重
         # self.dual_modal_predictor.load_state_dict(torch.load("checkpoints/dual_flow/dual_model_final.pth"))
         
@@ -59,12 +50,12 @@ class TrajectoryFlowGenerator(fastpredNF_TP):
         # else:
         #     self.dual_modal_predictor.load_state_dict(saved_model)
         
-        # 如果有历史轨迹数据，可以提前计算OD矩阵
-        self.od_matrix = None
+        # # 如果有历史轨迹数据，可以提前计算OD矩阵
+        # self.od_matrix = None
         
-        # 历史流量数据 - 保持为numpy数组直到forward方法调用
-        self.historical_flow = None
-        self.historical_flow_tensor = None
+        # # 历史流量数据 - 保持为numpy数组直到forward方法调用
+        # self.historical_flow = None
+        # self.historical_flow_tensor = None
         
         # self.load_historical_flow("mydata/his/BJ_MGF_17_19_100000_108.h5")
         
@@ -97,7 +88,6 @@ class TrajectoryFlowGenerator(fastpredNF_TP):
         """
         super().to(device)
         self.new_flow_predictor = self.new_flow_predictor.to(device)
-        self.dual_modal_predictor = self.dual_modal_predictor.to(device)
         
         # 仅在第一次调用时将历史流量数据转换为张量并移动到设备
         if self.historical_flow is not None and isinstance(self.historical_flow, np.ndarray):
@@ -215,7 +205,7 @@ class TrajectoryFlowGenerator(fastpredNF_TP):
         real_flow = real_flow.permute(1, 0, 2, 3).unsqueeze(0)  # [1, 2, time_steps, 32, 32]
         
         # 使用双模态模型预测
-        generated_flow = self.dual_modal_predictor(historical_flow, trajectory_flow)
+        generated_flow = trajectory_flow
         
         # 训练判别器
         d_loss = 0
@@ -241,13 +231,8 @@ class TrajectoryFlowGenerator(fastpredNF_TP):
         # 轨迹预测损失
         traj_loss = self.trajectory_loss(pred_traj, real_traj)
         
-        # 双模态流量预测损失
-        flow_loss = self.dual_modal_predictor.update(generated_flow, real_flow)
-        
-        # 总损失
-        total_g_loss = (traj_loss + 
-                       self.lambda_adv * g_loss + 
-                       self.lambda_new_flow * flow_loss)
+        # 只考虑对抗损失和轨迹损失 (移除了 flow_loss)
+        total_g_loss = (traj_loss + self.lambda_adv * g_loss)
         
         total_g_loss.backward()
         self.g_optimizer.step()
@@ -256,7 +241,6 @@ class TrajectoryFlowGenerator(fastpredNF_TP):
             "d_loss": d_loss.item(),
             "g_loss": g_loss.item(),
             "traj_loss": traj_loss.item(),
-            "flow_loss": flow_loss,
             "total_g_loss": total_g_loss.item()
         }
     

@@ -118,16 +118,9 @@ def train_flow_gan():
     # 构建评估指标
     metrics = Build_Metrics(cfg)
     
-    # # 检查是否需要训练双模态模型
-    # dual_model_path = os.path.join(args.dual_save_dir, f'dual_model_epoch_{args.dual_epochs}.pth')
-    # if not os.path.exists(dual_model_path):
-    #     print("未找到预训练的双模态模型，开始训练...")
-    #     dual_model = train_dual_model(args, device, cfg, model, metrics)
-    # else:
-    #     print("加载预训练的双模态模型...")
-    #     dual_model = DualModalFlowPredictor().to(device)
-    #     dual_model.load_state_dict(torch.load(dual_model_path))
-    
+    metrics = TrajectoryMetrics(metrics)
+    model.to(device)
+
     # 设置GAN训练参数
     model.lambda_adv = args.lambda_adv
     model.lambda_gp = args.lambda_gp

@@ -1,1 +1,1 @@
-# 基于个体轨迹的区域流量预测
+# IGNET: An Individual-Group Joint Framework for Regional Traffic Flow Prediction

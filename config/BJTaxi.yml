@@ -7,7 +7,7 @@ DATA:
   TP:
     PRED_STATE: 'state_v'
     ACCEPT_NAN: True
-  BATCH_SIZE: 32
+  BATCH_SIZE: 512
   NORMALIZED: True
     
 SOLVER:

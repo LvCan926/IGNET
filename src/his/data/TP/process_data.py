@@ -5,7 +5,7 @@
 
 import sys
 
-sys.path.append("./src")  # 添加自定义模块路径
+sys.path.append("./src/his")  # 添加自定义模块路径
 import os
 import numpy as np
 import pandas as pd
@@ -121,8 +121,8 @@ nl = 0
 l = 0
 
 # 路径配置
-raw_path = "./src/data/TP/raw_data"
-data_folder_name = "./src/data/TP/processed_data/"
+raw_path = "./src/his/data/TP/raw_data"
+data_folder_name = "./src/his/data/TP/processed_data/"
 
 maybe_makedirs(data_folder_name)  # 创建输出目录
 

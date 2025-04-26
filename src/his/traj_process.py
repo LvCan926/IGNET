@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
         default="config/",
         help="root path to config file",
     )
-    parser.add_argument("--scene", type=str, default="eth", help="scene name")
+    parser.add_argument("--scene", type=str, default="BJTaxi", help="scene name")
 
     parser.add_argument(
         "--aug_scene", action="store_true", help="trajectron++ augmentation"
@@ -474,7 +474,7 @@ def test(cfg, args, logger=None):
     args.config_file = f"./config/{scene}.yml"
     cfg = load_config_test(args)
 
-    args.use_clustering = True
+    args.use_clustering = False
     args.task = "test"
     
     args.clusterGMM = cfg.MGF.ENABLE
@@ -529,27 +529,21 @@ def test(cfg, args, logger=None):
         metrics_end_time = time.time()
         print(f"指标评估耗时: {metrics_end_time-metrics_start_time:.4f} s")
         
-        return
+
 
         # 直接聚合轨迹流量，使用cluster_size
         flow_start_time = time.time()
         pred_flow = aggregate_flow(best_preds_list, gt_ts_array, grid_size, time_start=7200, time_end=10079, cluster_size_array=cluster_size_array)
+        real_flow = aggregate_flow(gt_list, gt_ts_array, grid_size, time_start=7200, time_end=10079, cluster_size_array=cluster_size_array)
         
-        real_flow = np.load(f"mydata/real/real_BJ_2880_6-7.npy")
-        
-        # print(f"pred_flow.shape: {pred_flow.shape}")
-        
-        scene = args.scene
-        args.load_model = f"./checkpoint/{scene}.ckpt"
-        obs_length = args.past
 
         print(f"pred_flow.shape: {pred_flow.shape}")
         print(f"real_flow.shape: {real_flow.shape}")
         
         # 保存流量矩阵到npy文件
-        np.save(f"mydata/traj/pred_BJ_2880_6-7.npy", pred_flow)
+        np.save(f"data/his_BJ_2880_6-7.npy", pred_flow)
 
-        print(f"流量矩阵已保存到 mydata文件夹")
+        print(f"流量矩阵已保存到 data文件夹")
         flow_end_time = time.time()
         print(f"流量处理总耗时: {flow_end_time-flow_start_time:.4f} s")
         
