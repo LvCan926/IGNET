@@ -435,8 +435,8 @@ class Trajectron_encoder(nn.Module):
 
         env_path = (
             Path(cfg.DATA.PATH)
-            / cfg.DATA.TASK
-            / "processed_data"
+            #/ cfg.DATA.TASK
+            / "processed"
             / f"{cfg.DATA.DATASET_NAME}_train.pkl"
         )
         with open(env_path, "rb") as f:

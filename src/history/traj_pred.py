@@ -70,8 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--var_init", type=float, default=0.7, help="init var")
     parser.add_argument("--learnVAR", action="store_true")
 
-    parser.add_argument("--use_clustering", default=True, action="store_true", help="使用轨迹聚类减少数据量")
-    parser.add_argument("--cluster_count", type=int, default=2, help="每个场景每个时间步的聚类数量")
+    parser.add_argument("--use_clustering", default=False, action="store_true", help="使用轨迹聚类减少数据量")
+    parser.add_argument("--cluster_count", type=int, default=5, help="每个场景每个时间步的聚类数量")
 
     return parser.parse_args()
 

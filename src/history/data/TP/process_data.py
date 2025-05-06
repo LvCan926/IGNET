@@ -1,8 +1,3 @@
-"""
-轨迹预测数据处理脚本
-功能：处理ETH/UCY和Stanford Drone数据集，生成标准化格式并增强数据
-"""
-
 import sys
 
 sys.path.append("./src/history")  # 添加自定义模块路径
@@ -121,8 +116,8 @@ nl = 0
 l = 0
 
 # 路径配置
-raw_path = "./src/history/data/TP/raw_data"
-data_folder_name = "./src/history/data/TP/processed_data/"
+raw_path = "./data/raw"
+data_folder_name = "./data/processed"
 
 maybe_makedirs(data_folder_name)  # 创建输出目录
 
@@ -133,12 +128,12 @@ data_columns = pd.MultiIndex.from_product(
 
 
 # ======================= 处理ETH-UCY数据集 =======================
-for desired_source in ['eth', 'BJTaxi']:  # 遍历所有子数据集
+for desired_source in ['BJTaxi']:  # 遍历所有子数据集
     if desired_source != "BJTaxi":
         continue
     for data_class in ['train', 'val', 'test']:
-        if data_class != "test":
-            continue
+        # if data_class != "test":
+        #     continue
         
         # 初始化环境对象
         env = Environment(
@@ -154,12 +149,13 @@ for desired_source in ['eth', 'BJTaxi']:  # 遍历所有子数据集
             data_folder_name, "_".join([desired_source, data_class]) + ".pkl"
         )
 
-        # 遍历原始数据目录
+
         for subdir, dirs, files in os.walk(
-            os.path.join(raw_path, desired_source, data_class)
+            os.path.join(raw_path, desired_source)
         ):
             for file in files:
-                if file.endswith(".txt"):  # 处理文本数据文件
+                # 如果文件名和data_class一致
+                if file.endswith(data_class + ".txt"):
                     input_data_dict = dict()
                     full_data_path = os.path.join(subdir, file)
                     print("At", full_data_path)
@@ -179,33 +175,11 @@ for desired_source in ['eth', 'BJTaxi']:  # 遍历所有子数据集
                         data["track_id"], downcast="integer"
                     )
 
-                    if desired_source != "BJTaxi":
-                        data["frame_id"] = data["frame_id"] // 10  # 降采样到0.4秒间隔（原始10FPS）
-
-                    # data['frame_id'] -= data['frame_id'].min()
-
-                    
                     data["node_type"] = "PEDESTRIAN"
                     data["node_id"] = data["track_id"].astype(str)
 
                     # 由于数据已经按entity_id分组和time排序，不需要再排序
-                    if type == "ETH":
-                        data.sort_values("frame_id", inplace=True)
-
-                    # ETH测试集特殊处理（坐标缩放）
-                    if desired_source == "eth" and data_class == "test":
-                        data["pos_x"] = data["pos_x"] * 0.6
-                        data["pos_y"] = data["pos_y"] * 0.6
-
-                    # if data_class == "train":
-                    #     #data_gauss = data.copy(deep=True)
-                    #     data['pos_x'] = data['pos_x'] + 2 * np.random.normal(0,1)
-                    #     data['pos_y'] = data['pos_y'] + 2 * np.random.normal(0,1)
-
-                    # data = pd.concat([data, data_gauss])
-
-                    # data['pos_x'] = data['pos_x'] - data['pos_x'].mean()
-                    # data['pos_y'] = data['pos_y'] - data['pos_y'].mean()
+                    # data.sort_values("frame_id", inplace=True)
 
                     # 创建场景对象
                     max_timesteps = data["frame_id"].max() + 1
@@ -263,11 +237,11 @@ for desired_source in ['eth', 'BJTaxi']:  # 遍历所有子数据集
                         scene.nodes.append(node)
                         
                     # 数据增强（训练集每15度旋转生成新场景）
-                    if data_class == "train":
-                        scene.augmented = list()
-                        angles = np.arange(0, 360, 15) if data_class == "train" else [0]  # 生成15度间隔的所有角度
-                        for angle in angles:
-                            scene.augmented.append(augment_scene(scene, angle))
+                    # if data_class == "train":
+                    #     scene.augmented = list()
+                    #     angles = np.arange(0, 360, 15) if data_class == "train" else [0]  # 生成15度间隔的所有角度
+                    #     for angle in angles:
+                    #         scene.augmented.append(augment_scene(scene, angle))
 
                     print(scene)  # 打印场景信息
                     scenes.append(scene)

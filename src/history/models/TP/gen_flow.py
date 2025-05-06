@@ -140,8 +140,6 @@ class TrajectoryFlowGenerator(fastpredNF_TP):
         print(f"historical_flow.shape: {historical_flow.shape}")
         print(f"trajectory_flow.shape: {trajectory_flow.shape}")
         
-        # 使用双模态模型预测
-        #total_flow = self.dual_modal_predictor(historical_flow, trajectory_flow)
         total_flow = trajectory_flow
         
         # 转换回原始格式 [time_steps, direction_channels, grid_size, grid_size]

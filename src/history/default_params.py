@@ -6,9 +6,10 @@ _C.LOAD_TUNED = True
 
 # Data
 _C.DATA = CN()
-_C.DATA.PATH = "./src/history/data/"
+#_C.DATA.PATH = "./src/history/data/"
+_C.DATA.PATH = "./data"
 _C.DATA.TASK = "TP"
-_C.DATA.DATASET_NAME = "sdd"
+_C.DATA.DATASET_NAME = "BJTaxi"
 _C.DATA.OBSERVE_LENGTH = 8
 _C.DATA.PREDICT_LENGTH = 12
 _C.DATA.SKIP = 1

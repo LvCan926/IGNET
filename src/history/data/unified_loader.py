@@ -36,15 +36,15 @@ def unified_loader(
             # previous methods use the test split for validation
             env_path = (
                 Path(cfg.DATA.PATH)
-                / cfg.DATA.TASK
+                #/ cfg.DATA.TASK
                 / "processed_data"
                 / f"{cfg.DATA.DATASET_NAME}_test.pkl"
             )
         else:
             env_path = (
                 Path(cfg.DATA.PATH)
-                / cfg.DATA.TASK
-                / "processed_data"
+                #/ cfg.DATA.TASK
+                / "processed"
                 / f"{cfg.DATA.DATASET_NAME}_{split}.pkl"
             )
 
