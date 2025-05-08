@@ -70,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--var_init", type=float, default=0.7, help="init var")
     parser.add_argument("--learnVAR", action="store_true")
 
-    parser.add_argument("--use_clustering", default=True, action="store_true", help="使用轨迹聚类减少数据量")
+    parser.add_argument("--use_clustering", default=False, action="store_true", help="使用轨迹聚类减少数据量")
     parser.add_argument("--cluster_count", type=int, default=2, help="每个场景每个时间步的聚类数量")
 
     return parser.parse_args()
@@ -400,8 +400,6 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
                     if b < 5 and t == 1:  # 只对前5个样本的第一个轨迹点打印
                         print(f"样本 {b}, 时间步 {t}: 使用流量值 {flow_value}")
                         
-            if flow_value != 1:
-                print(flow_value)
             
             # 映射到网格坐标
             prev_row, prev_col = map_to_grid(prev_x, prev_y, min_lon, max_lon, min_lat, max_lat, grid_size)

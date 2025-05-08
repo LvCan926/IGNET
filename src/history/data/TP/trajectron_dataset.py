@@ -309,7 +309,7 @@ class ClusteredNodeTypeDataset(NodeTypeDataset):
                 loaded_clustered_node_ids = pickle.load(f)
             with open(info_filename, 'rb') as f:
                 # Loads dict of (scene_name, t, node_id) -> cluster_size
-                cluster_info = pickle.load(f)
+                loaded_cluster_info_with_names = pickle.load(f)
 
             # Reconstruct self.clustered_index from names/IDs
             node_map = {(s.name, ts, n.id): (s, ts, n) for s, ts, n in self.index}
@@ -322,10 +322,18 @@ class ClusteredNodeTypeDataset(NodeTypeDataset):
                 else:
                     warnings.warn(f"Node ID {n_id} at scene_name '{s_name}', time {t_val} not found in current environment index. Skipping.")
             
-            # cluster_info keys are already (scene_name, t, node.id) from the cache
-            # If self.cluster_info needs to use scene objects, adjust here or where it's used.
-            # For now, returning it as loaded.
-            return reconstructed_clustered_index, cluster_info
+            # Convert keys of cluster_info from (scene_name, t, node_id) to (scene_obj, t, node_id)
+            scene_name_to_obj_map = {s.name: s for s in self.env.scenes}
+            
+            final_cluster_info = {}
+            for (s_name, t_val, n_id), size in loaded_cluster_info_with_names.items():
+                scene_obj = scene_name_to_obj_map.get(s_name)
+                if scene_obj:
+                    final_cluster_info[(scene_obj, t_val, n_id)] = size
+                else:
+                    warnings.warn(f"Scene name '{s_name}' from cluster info cache not found in environment. Skipping info for node {n_id} at time {t_val}.")
+            
+            return reconstructed_clustered_index, final_cluster_info
         except Exception as e:
             warnings.warn(f"Error loading cached cluster data: {e}")
             return None, None
@@ -423,22 +431,30 @@ class ClusteredNodeTypeDataset(NodeTypeDataset):
         return self.len
     
     def __getitem__(self, i):
-        scene, t, node = self.clustered_index[i]
+        original_scene, original_t, original_node = self.clustered_index[i]
         
-        # 如果使用增强，则增强场景
+        current_scene_for_data = original_scene
+        current_node_for_data = original_node
         if self.augment:
-            scene = scene.augment()
-            node = scene.get_node_by_id(node.id)
+            current_scene_for_data = original_scene.augment()
+            current_node_for_data = current_scene_for_data.get_node_by_id(original_node.id)
+            if current_node_for_data is None: # Safety check if node not found in augmented scene
+                warnings.warn(f"Node {original_node.id} not found in augmented scene {current_scene_for_data.name}. Using original node and scene for data.")
+                current_node_for_data = original_node
+                current_scene_for_data = original_scene
         
-        # 获取节点数据
+        # Get node data using the potentially augmented scene and node, but original timestep
         node_data = get_node_timestep_data(
-            self.env, scene, t, node, self.state, self.pred_state, 
+            self.env, current_scene_for_data, original_t, current_node_for_data, 
+            self.state, self.pred_state, 
             self.edge_types, self.max_ht, self.max_ft, self.hyperparams,
             normalize_direction=self.normalize_direction
         )
         
-        # 获取该节点对应的聚类大小
-        cluster_size = self.cluster_info.get((scene, t, node.id), 1)
+        # Get cluster size using the original scene, t, and node.id for the lookup
+        # self.cluster_info is now consistently keyed by (original_scene_obj, t, node_id)
+        key_for_cluster_info = (original_scene, original_t, original_node.id)
+        cluster_size = self.cluster_info.get(key_for_cluster_info, 1) # Default to 1 if not found
         
         # 创建cluster_size张量
         x_len = node_data[1].shape[0]  # 历史轨迹长度

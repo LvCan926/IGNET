@@ -183,6 +183,7 @@ def main():
         base_filename = f"{args.dataset_name}_{node_type.name}_k{args.cluster_count}"
         index_cache_path = os.path.join(args.cache_dir, f"{base_filename}_indices.pkl")
         info_cache_path = os.path.join(args.cache_dir, f"{base_filename}_info.pkl")
+        txt_output_path = os.path.join(args.cache_dir, f"{base_filename}_results.txt") # New path for txt output
 
         try:
             with open(index_cache_path, 'wb') as f:
@@ -192,6 +193,22 @@ def main():
             with open(info_cache_path, 'wb') as f:
                 pickle.dump(cluster_info, f)
             print(f"Saved cluster info to: {info_cache_path}")
+
+            # Save to a human-readable txt file
+            with open(txt_output_path, 'w') as f_txt:
+                f_txt.write(f"Clustering Results for {node_type.name} with K={args.cluster_count}\n")
+                f_txt.write("="*50 + "\n")
+                
+                f_txt.write("Clustered Representative Indices (scene_name, timestep, node_id):\n")
+                for idx_tuple in clustered_indices:
+                    f_txt.write(f"  {idx_tuple}\n")
+                
+                f_txt.write("\n" + "="*50 + "\n")
+                f_txt.write("Cluster Information (scene_name, timestep, representative_node_id) -> cluster_size:\n")
+                for key, value in cluster_info.items():
+                    f_txt.write(f"  {key}: {value}\n")
+            print(f"Saved human-readable results to: {txt_output_path}")
+
         except IOError as e:
             print(f"Error saving cache files for {node_type.name}: {e}")
 

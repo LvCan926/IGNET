@@ -47,6 +47,9 @@ def unified_loader(
                 / "processed"
                 / f"{cfg.DATA.DATASET_NAME}_{split}.pkl"
             )
+        
+        # if use_clustering: # This line causes the error by loading the index list instead of the env object.
+        #     env_path = f"{cfg.DATA.CACHE_DIR}/BJTaxi_PEDESTRIAN_k2_indices.pkl"
 
         with open(env_path, "rb") as f:
             env = dill.load(f, encoding="latin1")
