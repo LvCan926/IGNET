@@ -70,8 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--var_init", type=float, default=0.7, help="init var")
     parser.add_argument("--learnVAR", action="store_true")
 
-    parser.add_argument("--use_clustering", default=False, action="store_true", help="使用轨迹聚类减少数据量")
-    parser.add_argument("--cluster_count", type=int, default=5, help="每个场景每个时间步的聚类数量")
+    parser.add_argument("--use_clustering", default=True, action="store_true", help="使用轨迹聚类减少数据量")
+    parser.add_argument("--cluster_count", type=int, default=2, help="每个场景每个时间步的聚类数量")
 
     return parser.parse_args()
 
@@ -144,15 +144,9 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
         
         # 新增：存储cluster_size数据
         cluster_size_list = []
-
-        data_loading_time = 0
-        encoder_time = 0
-        flow_sample_time = 0
-        denormalize_time = 0
         
         #print("开始加载数据...")
         for i, data_dict in enumerate(tqdm(data_loader, leave=False, disable=disable_tqdm)):
-            batch_start_time = time.time()
             #print(f"批次 {i} 数据字典的键:", data_dict.keys())
             if "obs_ts" in data_dict:
                 batch_obs_ts = data_dict["obs_ts"]
@@ -192,18 +186,13 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
                 for k in data_dict
             }
             
-            data_loading_time += time.time() - batch_start_time
-            
             #print(f"批次 {i} 数据形状:")
             #for k, v in data_dict.items():
             #    if isinstance(v, torch.Tensor):
             #        print(f"{k}: {v.shape}")
             
-            encoder_start_time = time.time()
             dist_args = model.encoder(data_dict)
-            encoder_time += time.time() - encoder_start_time
 
-            base_pos_start_time = time.time()
             if cfg.MGF.ENABLE:
                 base_pos = model.get_base_pos(data_dict).clone()
             else:
@@ -213,15 +202,11 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
                     .clone()
                 )  # (B, 20, 2)
             dist_args = dist_args[:, None].expand(-1, cfg.MGF.POST_CLUSTER, -1, -1)
-            base_pos_time = time.time() - base_pos_start_time
 
-            flow_sample_start_time = time.time()
             sampled_seq = model.flow.sample(
                 base_pos, cond=dist_args, n_sample=cfg.MGF.POST_CLUSTER
             )
-            flow_sample_time += time.time() - flow_sample_start_time
 
-            dict_process_start_time = time.time()
             dict_list = []
             for i in range(cfg.MGF.POST_CLUSTER):
                 data_dict_i = deepcopy(data_dict)
@@ -235,11 +220,8 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
                         data_dict_i[("pred_st", 0)],
                     )
                 dict_list.append(data_dict_i)
-            dict_process_time = time.time() - dict_process_start_time
 
-            denormalize_start_time = time.time()
             dict_list = metrics.denormalize(dict_list)
-            denormalize_time += time.time() - denormalize_start_time
 
             process_results_start_time = time.time()
             for data_dict in dict_list:
@@ -252,13 +234,6 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
             pred_list.append(pred_list_i)
             gt_list.append(gt_list_i)
             obs_list.append(obs_list_i)
-            process_results_time = time.time() - process_results_start_time
-
-        # 打印单批次各阶段耗时
-        print(f"编码器耗时: {encoder_time:.4f} s")
-        print(f"流采样耗时: {flow_sample_time:.4f} s")
-        print(f"字典处理耗时: {dict_process_time:.4f} s")
-        print(f"去归一化耗时: {denormalize_time:.4f} s")
 
     # 检查列表是否为空
     if len(pred_list) == 0:
@@ -286,6 +261,11 @@ def run_inference(cfg, model, metrics, data_loader, disable_tqdm=False):
     if cluster_size_list:
         cluster_size_array = np.concatenate(cluster_size_list, axis=0)
     concat_time = time.time() - concat_start_time
+    
+    # 检查cluster_size_array中是否存在大于1的值
+    if cluster_size_array is not None:
+        print(f"cluster_size_array中存在大于1的值: {np.any(cluster_size_array > 1)}")
+        print(f"cluster_size_array中大于1的值: {cluster_size_array[cluster_size_array > 1]}")
 
     pred_list_flatten_start_time = time.time()
     pred_list_flatten = torch.Tensor(
@@ -346,7 +326,6 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
     返回:
     flow: 流量矩阵，形状为 (time_count, 2, grid_size, grid_size)
     """
-    flow_start_time = time.time()
     
     # 调试信息：查看cluster_size_array是否存在及其形状
     if cluster_size_array is not None:
@@ -416,10 +395,13 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
                 # 因为 sample_cluster_size 中所有值都相同 (代表该样本的簇大小)
                 # 所以直接取第一个元素即可
                 current_cluster_size = int(sample_cluster_size[0])
-                if current_cluster_size > 0:  # 使用有效的簇大小
+                if current_cluster_size > 1:  # 使用有效的簇大小
                     flow_value = current_cluster_size
                     if b < 5 and t == 1:  # 只对前5个样本的第一个轨迹点打印
                         print(f"样本 {b}, 时间步 {t}: 使用流量值 {flow_value}")
+                        
+            if flow_value != 1:
+                print(flow_value)
             
             # 映射到网格坐标
             prev_row, prev_col = map_to_grid(prev_x, prev_y, min_lon, max_lon, min_lat, max_lat, grid_size)
@@ -433,8 +415,6 @@ def aggregate_flow(traj, gt_ts_array, grid_size=32, time_start=7200, time_end=10
     
     print(f"预测时间步的最大最小值: {pred_time_max}/{pred_time_min}")
     print(f"有效样本数: {valid_samples}")
-    flow_end_time = time.time()
-    print(f"流量聚合耗时: {flow_end_time-flow_start_time:.4f} s")
     
     return flow
 
@@ -498,13 +478,10 @@ def test(cfg, args, logger=None):
     model_build_end_time = time.time()
     print(f"模型构建耗时: {model_build_end_time-model_build_start_time:.4f} s")
 
-    checkpoint_load_start_time = time.time()
     # 修改加载方式，使用strict=False允许部分加载
     checkpoint = torch.load(args.load_model)
     model.load_state_dict(checkpoint["state"], strict=False)
     print("预训练模型已加载（不包含判别器部分）")
-    checkpoint_load_end_time = time.time()
-    print(f"模型检查点加载耗时: {checkpoint_load_end_time-checkpoint_load_start_time:.4f} s")
     
     dataloader_start_time = time.time()
     # 1. Setup dataloaders
@@ -533,20 +510,15 @@ def test(cfg, args, logger=None):
         print(f"{args.scene} test {i_trial}:\n {minade}/{minfde}")
         
         # 直接聚合轨迹流量，使用cluster_size
-        flow_start_time = time.time()
         pred_flow = aggregate_flow(best_preds_list, gt_ts_array, grid_size, time_start=7200, time_end=10079, cluster_size_array=cluster_size_array)
         real_flow = aggregate_flow(gt_list, gt_ts_array, grid_size, time_start=7200, time_end=10079, cluster_size_array=cluster_size_array)
         
-
         print(f"pred_flow.shape: {pred_flow.shape}")
         print(f"real_flow.shape: {real_flow.shape}")
         
         # 保存流量矩阵到npy文件
         np.save(f"data/his_BJ_2880_6-7.npy", pred_flow)
-
         print(f"流量矩阵已保存到 data文件夹")
-        flow_end_time = time.time()
-        print(f"流量处理总耗时: {flow_end_time-flow_start_time:.4f} s")
         
         # 计算流量误差（不依赖于模型）
         outflow_rmse, outflow_mae = calculate_metrics(pred_flow, real_flow, direction=0)

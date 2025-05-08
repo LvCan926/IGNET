@@ -4,6 +4,8 @@ import numpy as np
 from data.TP.preprocessing import get_node_timestep_data
 from copy import deepcopy
 import warnings
+import os
+import pickle
 
 try:
     from sklearn.cluster import KMeans
@@ -243,6 +245,8 @@ class ClusteredNodeTypeDataset(NodeTypeDataset):
         augment=False,
         normalize_direction=False,
         cluster_count=10,
+        dataset_name_for_cache: str = None,
+        cache_dir: str = None,
         **kwargs
     ):
         if not SKLEARN_AVAILABLE:
@@ -253,12 +257,102 @@ class ClusteredNodeTypeDataset(NodeTypeDataset):
             scene_freq_mult, hyperparams, augment, normalize_direction, **kwargs
         )
         self.cluster_count = cluster_count
-        # 按场景和时间步组织索引
-        self.scene_timestep_index = self._organize_indices()
-        # 创建聚类后的新索引
-        self.clustered_index, self.cluster_info = self._create_clustered_index()
-        self.len = len(self.clustered_index)
-        print(f"原始数据点: {len(self.index)}, 聚类后: {self.len}")
+        self.dataset_name_for_cache = dataset_name_for_cache
+        self.cache_dir = cache_dir
+
+        loaded_from_cache = False
+        if self.cache_dir and self.dataset_name_for_cache:
+            self.clustered_index, self.cluster_info = self._load_cluster_data()
+            
+            # print(f"self.clustered_index: {self.clustered_index}")
+            # print(f"self.cluster_info: {self.cluster_info}")
+            
+            if self.clustered_index is not None and self.cluster_info is not None:
+                loaded_from_cache = True
+                self.len = len(self.clustered_index)
+                print(f"Loaded pre-clustered data for {self.node_type.name} from cache. Cluster count: {self.cluster_count}. Points: {self.len}")
+
+        if not loaded_from_cache:
+            print("需计算聚类")
+            
+            # 按场景和时间步组织索引
+            self.scene_timestep_index = self._organize_indices()
+            # 创建聚类后的新索引
+            self.clustered_index, self.cluster_info = self._compute_clusters_and_info()
+            self.len = len(self.clustered_index)
+            print(f"Computed clusters for {self.node_type.name}. Original points: {len(self.index)}, Clustered points: {self.len}")
+
+            if self.cache_dir and self.dataset_name_for_cache:
+                self._save_cluster_data()
+                print(f"Saved clustered data for {self.node_type.name} to cache.")
+        
+    def _get_cache_filenames(self):
+        print(f"node_type.name: {self.node_type.name}")
+        
+        if not self.cache_dir or not self.dataset_name_for_cache or not hasattr(self.node_type, 'name'):
+            return None, None
+        
+        base_filename = f"{self.dataset_name_for_cache}_{self.node_type.name}_k{self.cluster_count}"
+        index_filename = os.path.join(self.cache_dir, f"{base_filename}_indices.pkl")
+        info_filename = os.path.join(self.cache_dir, f"{base_filename}_info.pkl")
+        return index_filename, info_filename
+
+    def _load_cluster_data(self):
+        index_filename, info_filename = self._get_cache_filenames()
+        
+        if index_filename is None or not os.path.exists(index_filename) or not os.path.exists(info_filename):
+            return None, None
+        
+        try:
+            with open(index_filename, 'rb') as f:
+                # Loads list of (scene_name, t, node_id)
+                loaded_clustered_node_ids = pickle.load(f)
+            with open(info_filename, 'rb') as f:
+                # Loads dict of (scene_name, t, node_id) -> cluster_size
+                cluster_info = pickle.load(f)
+
+            # Reconstruct self.clustered_index from names/IDs
+            node_map = {(s.name, ts, n.id): (s, ts, n) for s, ts, n in self.index}
+            
+            reconstructed_clustered_index = []
+            for s_name, t_val, n_id in loaded_clustered_node_ids:
+                key = (s_name, t_val, n_id)
+                if key in node_map:
+                    reconstructed_clustered_index.append(node_map[key])
+                else:
+                    warnings.warn(f"Node ID {n_id} at scene_name '{s_name}', time {t_val} not found in current environment index. Skipping.")
+            
+            # cluster_info keys are already (scene_name, t, node.id) from the cache
+            # If self.cluster_info needs to use scene objects, adjust here or where it's used.
+            # For now, returning it as loaded.
+            return reconstructed_clustered_index, cluster_info
+        except Exception as e:
+            warnings.warn(f"Error loading cached cluster data: {e}")
+            return None, None
+
+    def _save_cluster_data(self):
+        index_filename, info_filename = self._get_cache_filenames()
+        if index_filename is None:
+            warnings.warn("Cache directory or dataset name not configured. Skipping saving cluster data.")
+            return
+
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Convert clustered_index (list of (scene_obj, t_val, node_obj)) to list of (scene_name, t_val, node_id)
+        serializable_clustered_index = [(s.name, t_val, n.id) for s, t_val, n in self.clustered_index]
+        
+        # Convert self.cluster_info keys from (scene_obj, t_val, node_id_val) to (scene_name, t_val, node_id_val)
+        serializable_cluster_info = {}
+        for (scene_obj, t_val, node_id_val), size in self.cluster_info.items():
+            serializable_cluster_info[(scene_obj.name, t_val, node_id_val)] = size
+
+        try:
+            with open(index_filename, 'wb') as f:
+                pickle.dump(serializable_clustered_index, f)
+            with open(info_filename, 'wb') as f:
+                pickle.dump(serializable_cluster_info, f)
+        except Exception as e:
+            warnings.warn(f"Error saving cluster data to cache: {e}")
         
     def _organize_indices(self):
         """将索引按场景和时间步组织"""
@@ -270,10 +364,10 @@ class ClusteredNodeTypeDataset(NodeTypeDataset):
             scene_timestep_dict[key].append((idx, node))
         return scene_timestep_dict
     
-    def _create_clustered_index(self):
+    def _compute_clusters_and_info(self):
         """为每个场景和时间步创建聚类后的索引"""
         clustered_index = []
-        cluster_info = {}  # 存储聚类信息
+        cluster_info = {}  # 存储聚类信息, key: (scene_obj, t, node.id)
         
         for (scene, t), node_indices in self.scene_timestep_index.items():
             # 如果节点数量少于聚类数，直接使用所有节点
@@ -376,6 +470,8 @@ class ClusteredEnvironmentDataset(EnvironmentDataset):
         cluster_count=10,
         augment=False,
         normalize_direction=False,
+        dataset_name_for_cache: str = None,
+        cache_dir: str = None,
         **kwargs
     ):
         self.env = env
@@ -403,6 +499,8 @@ class ClusteredEnvironmentDataset(EnvironmentDataset):
                     cluster_count=cluster_count,
                     augment=augment,
                     normalize_direction=normalize_direction,
+                    dataset_name_for_cache=dataset_name_for_cache,
+                    cache_dir=cache_dir,
                     **kwargs
                 )
             )

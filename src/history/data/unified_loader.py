@@ -70,6 +70,8 @@ def unified_loader(
                 min_future_timesteps=cfg.DATA.PREDICT_LENGTH,
                 augment=aug_scene,
                 normalize_direction=cfg.DATA.NORMALIZED,
+                dataset_name_for_cache=cfg.DATA.DATASET_NAME,
+                cache_dir=cfg.DATA.CACHE_DIR,
             )
         else:
             dataset = EnvironmentDataset(
